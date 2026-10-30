@@ -7,7 +7,7 @@
 1. Загрузите все файлы проекта в репозиторий GitHub (ветка main).
 2. Вкладка Actions → «Сборка» → Run workflow (или просто дождитесь запуска после загрузки).
 3. После завершения скачайте файлы из блока Artifacts внизу страницы запуска:
-   linux-deb-appimage, windows-exe, android-apk.
+   linux-deb-appimage, linux-flatpak, windows-exe, android-apk.
 
 ## Что где хранится
 Избранное (имя, хост, порт, пользователь), отпечатки ключей серверов и загруженные YAML-файлы

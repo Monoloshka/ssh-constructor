@@ -1,13 +1,23 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SSH Конструктор",
+  "productName": "ssh-constructor",
   "version": "0.1.0",
   "identifier": "org.example.sshconstructor",
-  "build": { "frontendDist": "../src" },
+  "build": {
+    "frontendDist": "../src"
+  },
   "app": {
     "withGlobalTauri": true,
-    "windows": [{ "title": "SSH Конструктор", "width": 1000, "height": 720 }],
-    "security": { "csp": null }
+    "windows": [
+      {
+        "title": "SSH Конструктор",
+        "width": 1000,
+        "height": 720
+      }
+    ],
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
@@ -19,5 +29,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  }
+  },
+  "mainBinaryName": "ssh-constructor"
 }

@@ -24,7 +24,7 @@ button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
 .tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 pre{background:#000;color:#cfe;padding:10px;border-radius:8px;overflow:auto;white-space:pre-wrap;max-height:50vh;margin:8px 0 0}
 progress{width:100%;height:20px}
-.err{color:var(--err)}.hide{display:none}
+.err{color:var(--err)}.ok{color:#16a34a}.hint{font-size:.85em;opacity:.75;margin:4px 0}.hide{display:none}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--fg);max-width:90vw}
 </style>
 </head>
@@ -45,9 +45,11 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--bg);colo
       </div>
       <label>Пароль (или passphrase ключа). Нигде не сохраняется</label>
       <input id="f-pass" type="password" autocomplete="current-password">
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="f-show" style="width:auto"> Показать пароль</label>
       <details><summary>SSH-ключ (необязательно)</summary>
         <label>Путь к файлу ключа</label><input id="f-key" placeholder="/home/user/.ssh/id_ed25519"></details>
       <button id="b-connect">Подключиться</button>
+      <button id="b-test" class="sec">Проверить подключение</button>
       <button id="b-save" class="sec">Добавить в избранное</button>
       <div id="login-err" class="err"></div>
     </div>
@@ -57,7 +59,14 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--bg);colo
     <div class="row" style="align-items:center">
       <div id="who"></div>
       <select id="app-pick"></select>
-      <div><button id="b-file" class="sec">Загрузить файл…</button><button id="b-out" class="sec">Выйти</button></div>
+      <div><button id="b-edit" class="sec">Редактор</button><button id="b-file" class="sec">Открыть файл…</button><button id="b-out" class="sec">Выйти</button></div>
+    </div>
+    <div id="editor" class="card hide">
+      <b>Описание приложения</b>
+      <div class="hint">Это текст (YAML): какие вкладки, кнопки, поля и полосы показывать. Меняйте его прямо здесь, без файлов. Пример уже открыт ниже, измените и нажмите «Сохранить».</div>
+      <label>Название (под ним сохранится в списке)</label><input id="ed-name">
+      <label>Текст</label><textarea id="ed-text" rows="16" spellcheck="false" style="font-family:monospace"></textarea>
+      <button id="ed-save">Сохранить и открыть</button><button id="ed-close" class="sec">Закрыть</button><button id="ed-del" class="sec">Удалить это</button>
     </div>
     <input id="file-in" type="file" accept=".yaml,.yml,.txt" class="hide">
     <div id="tabs" class="tabs"></div>
@@ -97,27 +106,33 @@ $('#b-save').onclick=()=>{
   if(i>=0)favs[i]=f;else favs.push(f);save('favs',favs);renderFavs();$('#login-err').textContent='';
 };
 
-$('#b-connect').onclick=async()=>{
-  const f=formData(),pw=$('#f-pass').value,key=$('#f-key').value.trim(),err=$('#login-err');
-  err.textContent='';if(!f.host||!f.user){err.textContent='Укажите хост и пользователя';return}
+async function tryConnect(f,pw,key,err){
+  const fail=m=>{err.className='err';err.textContent=m;return false};
+  err.className='';err.textContent='Подключение…';
+  if(!f.host||!f.user)return fail('Укажите хост и пользователя');
   const id=`${f.host}:${f.port}`;let trust=false;
   for(let i=0;i<2;i++){
     try{
       const fp=await invoke('connect',{host:f.host,port:f.port,user:f.user,password:pw,keyPath:key||null,knownFp:fps[id]||null,trust});
-      fps[id]=fp;save('fps',fps);$('#f-pass').value='';return enterApp(f);
+      fps[id]=fp;save('fps',fps);err.textContent='';return true;
     }catch(e){
       e=String(e);
       if(e.startsWith('KEY:')){
         const [,kind,...r]=e.split(':'),fp=r.join(':');
         const q=kind==='CHANGED'?`ВНИМАНИЕ! Ключ сервера ${id} изменился.\nЭто может быть подмена. Новый отпечаток:\n${fp}\n\nВсё равно доверять?`
                                 :`Первое подключение к ${id}.\nОтпечаток ключа:\n${fp}\n\nДоверять этому серверу?`;
-        if(!(await ask(q))){err.textContent='Подключение отменено';return}
+        if(!(await ask(q)))return fail('Подключение отменено');
         trust=true;continue;
       }
-      err.textContent=e;return;
+      return fail(e);
     }
   }
-};
+  return false;
+}
+$('#b-connect').onclick=async()=>{const f=formData();if(await tryConnect(f,$('#f-pass').value,$('#f-key').value.trim(),$('#login-err'))){$('#f-pass').value='';enterApp(f)}};
+$('#b-test').onclick=async()=>{const err=$('#login-err');
+  if(await tryConnect(formData(),$('#f-pass').value,$('#f-key').value.trim(),err)){await invoke('disconnect');err.className='ok';err.textContent='✓ Подключение успешно: сервер отвечает, логин и пароль верные'}};
+$('#f-show').onchange=e=>{$('#f-pass').type=e.target.checked?'text':'password'};
 
 /* ---------- экран приложения ---------- */
 async function enterApp(f){
@@ -142,6 +157,17 @@ $('#b-file').onclick=()=>$('#file-in').click();
 $('#file-in').onchange=async e=>{const f=e.target.files[0];if(!f)return;apps[f.name]=await f.text();save('apps',apps);e.target.value='';refreshPick(f.name)};
 $('#b-out').onclick=async()=>{await invoke('disconnect');$('#appscr').classList.add('hide');$('#login').classList.remove('hide')};
 
+
+$('#b-edit').onclick=async()=>{
+  const n=$('#app-pick').value;
+  $('#ed-name').value=n==='@example'?'мой-сервер.yaml':n;
+  $('#ed-text').value=n==='@example'?await (await fetch('example.yaml')).text():apps[n];
+  $('#editor').classList.remove('hide');
+};
+$('#ed-close').onclick=()=>$('#editor').classList.add('hide');
+$('#ed-save').onclick=async()=>{const n=$('#ed-name').value.trim();if(!n)return;apps[n]=$('#ed-text').value;save('apps',apps);$('#editor').classList.add('hide');await refreshPick(n)};
+$('#ed-del').onclick=async()=>{const n=$('#ed-name').value.trim();if(apps[n]&&await ask(`Удалить «${n}»?`)){delete apps[n];save('apps',apps);$('#editor').classList.add('hide');await refreshPick()}};
+
 function renderTabs(){
   const t=$('#tabs');t.replaceChildren();
   (doc.pages||[]).forEach((p,i)=>t.append(el('button',{class:i===curPage?'on':'',onclick:()=>{curPage=i;renderTabs();renderPage()}},p.title||('Страница '+(i+1)))));
@@ -164,9 +190,9 @@ function build(cmd,fields){
 
 async function exec(cmd){const r=await invoke('run_command',{command:cmd});return r}
 
-const SOURCES={
-  memory:"free -b | awk '/^Mem:/{print $2, $3}'",
-  disk:"df -B1 / | awk 'NR==2{print $2, $3}'"
+const SOURCES={ // команды выводят "всего занято" в килобайтах; работают и на BusyBox (OpenWrt)
+  memory:{mul:1024,cmd:"awk '/^MemTotal/{t=$2}/^MemAvailable/{a=$2}/^MemFree/{f=$2}END{if(!a)a=f;print t,t-a}' /proc/meminfo"},
+  disk:{mul:1024,cmd:"df -kP / | awk 'NR==2{print $2,$3}'"}
 };
 
 function renderPage(){
@@ -191,10 +217,10 @@ function renderPage(){
       const bar=el('progress',{max:100,value:0}),txt=el('div',{},'…');
       const upd=async()=>{
         try{
-          const cmd=it.run||SOURCES[it.source];if(!cmd)throw new Error('Неизвестный source: '+it.source);
-          const r=await exec(cmd);const [total,used]=r.output.trim().split(/\s+/).map(Number);
+          const src=it.run?{cmd:it.run,mul:1}:SOURCES[it.source];if(!src)throw new Error('Неизвестный source: '+it.source);
+          const r=await exec(src.cmd);const [total,used]=r.output.trim().split(/\s+/).map(Number);
           if(!total||isNaN(used))throw new Error('Не удалось разобрать ответ: '+r.output);
-          const u=it.unit||'MB',k=UNITS[u]||1;
+          const u=it.unit||'MB',k=(UNITS[u]||1)/src.mul;
           bar.value=used/total*100;txt.textContent=`${(used/k).toFixed(0)} из ${(total/k).toFixed(0)} ${u} (${(used/total*100).toFixed(0)}%)`;
         }catch(e){txt.textContent=String(e);txt.className='err'}
       };

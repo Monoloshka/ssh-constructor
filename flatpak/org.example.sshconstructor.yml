@@ -1,0 +1,28 @@
+app-id: org.example.sshconstructor
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: ssh-constructor
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+modules:
+  - name: ssh-constructor
+    buildsystem: simple
+    build-commands:
+      - ar x ssh-constructor.deb
+      - tar xf data.tar.*
+      - install -Dm755 usr/bin/ssh-constructor /app/bin/ssh-constructor
+      - install -Dm644 usr/share/applications/ssh-constructor.desktop /app/share/applications/org.example.sshconstructor.desktop
+      - sed -i 's/^Icon=.*/Icon=org.example.sshconstructor/' /app/share/applications/org.example.sshconstructor.desktop
+      - |
+        for f in $(find usr/share/icons -name 'ssh-constructor.png'); do
+          d=$(dirname "${f#usr/}")
+          install -Dm644 "$f" "/app/$d/org.example.sshconstructor.png"
+        done
+    sources:
+      - type: file
+        path: ssh-constructor.deb

@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Основные права окна",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "opener:default"]
 }

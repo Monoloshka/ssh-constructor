@@ -12,7 +12,7 @@ pages:
       - field: site
         label: Сайт
         type: host
-        default: google.com
+        placeholder: google.com
       - field: count
         label: Количество
         type: number
@@ -23,13 +23,26 @@ pages:
         options: { IPv4: "-4", IPv6: "-6" }
       - button: Старт
         run: ping {site} {proto} -c {count}
-        show: output
 
   - title: Состояние
     items:
       - progress: Оперативная память
         source: memory
       - progress: Хранилище (как в LuCI)
-        source: disk          # на OpenWrt берётся /overlay; другой путь: path: /tmp
+        source: disk
       - button: Аптайм и нагрузка
         run: uptime
+
+  - title: Питание
+    items:
+      # Цепочка с запасным вариантом: на разных системах команда может отличаться
+      - button: Перезапустить SSH-сервер
+        confirm: true
+        run:
+          - cmd: systemctl restart ssh
+            fail_if: "not found"
+            fallback:
+              - /etc/init.d/dropbear restart
+      - button: Перезагрузить устройство
+        reboot: true          # после команды программа сама дождётся устройства и переподключится
+        run: reboot

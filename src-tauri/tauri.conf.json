@@ -30,7 +30,7 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
-    "category": "Network",
+    "category": "Utility",
     "shortDescription": "Управление роутером и сервером по SSH",
     "longDescription": "Приложение рисует кнопки, поля и списки служб по текстовому описанию и выполняет команды на сервере по SSH."
   },

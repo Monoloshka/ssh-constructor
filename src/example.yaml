@@ -1,0 +1,35 @@
+app:
+  name: Мой сервер
+
+pages:
+  - title: Службы
+    items:
+      - button: Запустить SFTP
+        run: systemctl start openssh-sftp-server
+
+  - title: Пинг
+    items:
+      - field: site
+        label: Сайт
+        type: host
+        default: google.com
+      - field: count
+        label: Количество
+        type: number
+        default: 4
+      - field: proto
+        label: Протокол
+        type: choice
+        options: { IPv4: "-4", IPv6: "-6" }
+      - button: Старт
+        run: ping {site} {proto} -c {count}
+        show: output
+
+  - title: Состояние
+    items:
+      - progress: Оперативная память
+        source: memory
+        unit: MB
+      - progress: Диск
+        source: disk
+        unit: GB

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SSH Конструктор</title>
+<style>
+:root{--bg:#fff;--fg:#1b1f24;--card:#f3f5f8;--line:#d0d7de;--acc:#2563eb;--err:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1318;--fg:#e6edf3;--card:#1a2029;--line:#303944;--acc:#4c8dff}}
+*{box-sizing:border-box}
+body{margin:0;font:16px system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1,h2{margin:.4em 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}
+label{display:block;margin:8px 0 2px;font-size:.9em;opacity:.8}
+input,select,textarea{width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+button{padding:9px 14px;border:0;border-radius:8px;background:var(--acc);color:#fff;font:inherit;cursor:pointer;margin:6px 6px 0 0}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:120px}
+.fav{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+.fav:last-child{border:0}.fav b{cursor:pointer}.fav small{opacity:.7;display:block}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:10px 0}
+.tabs button{background:transparent;color:var(--fg);border:1px solid var(--line);white-space:nowrap;margin:0}
+.tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+pre{background:#000;color:#cfe;padding:10px;border-radius:8px;overflow:auto;white-space:pre-wrap;max-height:50vh;margin:8px 0 0}
+progress{width:100%;height:20px}
+.err{color:var(--err)}.hide{display:none}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--fg);max-width:90vw}
+</style>
+</head>
+<body>
+<main>
+  <h1>SSH Конструктор</h1>
+
+  <section id="login">
+    <div class="card"><b>Избранное</b><div id="favs"></div></div>
+    <div class="card">
+      <div class="row">
+        <div><label>Имя</label><input id="f-name" placeholder="Домашний роутер"></div>
+        <div><label>Хост (IP или домен)</label><input id="f-host" placeholder="192.168.1.1" autocapitalize="off"></div>
+      </div>
+      <div class="row">
+        <div><label>Порт</label><input id="f-port" type="number" value="22"></div>
+        <div><label>Пользователь</label><input id="f-user" value="root" autocapitalize="off"></div>
+      </div>
+      <label>Пароль (или passphrase ключа). Нигде не сохраняется</label>
+      <input id="f-pass" type="password" autocomplete="current-password">
+      <details><summary>SSH-ключ (необязательно)</summary>
+        <label>Путь к файлу ключа</label><input id="f-key" placeholder="/home/user/.ssh/id_ed25519"></details>
+      <button id="b-connect">Подключиться</button>
+      <button id="b-save" class="sec">Добавить в избранное</button>
+      <div id="login-err" class="err"></div>
+    </div>
+  </section>
+
+  <section id="appscr" class="hide">
+    <div class="row" style="align-items:center">
+      <div id="who"></div>
+      <select id="app-pick"></select>
+      <div><button id="b-file" class="sec">Загрузить файл…</button><button id="b-out" class="sec">Выйти</button></div>
+    </div>
+    <input id="file-in" type="file" accept=".yaml,.yml,.txt" class="hide">
+    <div id="tabs" class="tabs"></div>
+    <div id="page"></div>
+  </section>
+</main>
+
+<dialog id="dlg"><p id="dlg-text" style="white-space:pre-wrap"></p>
+  <button id="dlg-yes">Да</button><button id="dlg-no" class="sec">Нет</button></dialog>
+
+<script>
+const {invoke}=window.__TAURI__.core;
+const $=s=>document.querySelector(s);
+const el=(t,p={},...k)=>{const e=document.createElement(t);for(const[a,v]of Object.entries(p)){if(a==='class')e.className=v;else if(a.startsWith('on'))e.addEventListener(a.slice(2),v);else e.setAttribute(a,v)}e.append(...k);return e};
+const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
+const save=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+let favs=load('favs',[]), fps=load('fps',{}), apps=load('apps',{}), doc=null, curPage=0;
+const UNITS={B:1,KB:1024,MB:1048576,GB:1073741824};
+
+function ask(text){return new Promise(res=>{const d=$('#dlg');$('#dlg-text').textContent=text;
+  const done=v=>{d.close();res(v)};$('#dlg-yes').onclick=()=>done(true);$('#dlg-no').onclick=()=>done(false);d.showModal()})}
+
+/* ---------- избранное и вход ---------- */
+function renderFavs(){
+  const box=$('#favs');box.replaceChildren();
+  if(!favs.length){box.append(el('small',{},'Пока пусто'));return}
+  favs.forEach((f,i)=>box.append(el('div',{class:'fav'},
+    el('div',{},el('b',{onclick:()=>fill(f)},f.name||f.host),el('small',{},`${f.user}@${f.host}:${f.port}`)),
+    el('button',{class:'sec',onclick:()=>{favs.splice(i,1);save('favs',favs);renderFavs()}},'Удалить'))));
+}
+function fill(f){$('#f-name').value=f.name||'';$('#f-host').value=f.host;$('#f-port').value=f.port;$('#f-user').value=f.user;$('#f-pass').focus()}
+function formData(){return{name:$('#f-name').value.trim(),host:$('#f-host').value.trim(),port:+$('#f-port').value||22,user:$('#f-user').value.trim()}}
+
+$('#b-save').onclick=()=>{
+  const f=formData();if(!f.host||!f.user){$('#login-err').textContent='Укажите хост и пользователя';return}
+  const i=favs.findIndex(x=>x.host===f.host&&x.port===f.port&&x.user===f.user);
+  if(i>=0)favs[i]=f;else favs.push(f);save('favs',favs);renderFavs();$('#login-err').textContent='';
+};
+
+$('#b-connect').onclick=async()=>{
+  const f=formData(),pw=$('#f-pass').value,key=$('#f-key').value.trim(),err=$('#login-err');
+  err.textContent='';if(!f.host||!f.user){err.textContent='Укажите хост и пользователя';return}
+  const id=`${f.host}:${f.port}`;let trust=false;
+  for(let i=0;i<2;i++){
+    try{
+      const fp=await invoke('connect',{host:f.host,port:f.port,user:f.user,password:pw,keyPath:key||null,knownFp:fps[id]||null,trust});
+      fps[id]=fp;save('fps',fps);$('#f-pass').value='';return enterApp(f);
+    }catch(e){
+      e=String(e);
+      if(e.startsWith('KEY:')){
+        const [,kind,...r]=e.split(':'),fp=r.join(':');
+        const q=kind==='CHANGED'?`ВНИМАНИЕ! Ключ сервера ${id} изменился.\nЭто может быть подмена. Новый отпечаток:\n${fp}\n\nВсё равно доверять?`
+                                :`Первое подключение к ${id}.\nОтпечаток ключа:\n${fp}\n\nДоверять этому серверу?`;
+        if(!(await ask(q))){err.textContent='Подключение отменено';return}
+        trust=true;continue;
+      }
+      err.textContent=e;return;
+    }
+  }
+};
+
+/* ---------- экран приложения ---------- */
+async function enterApp(f){
+  $('#login').classList.add('hide');$('#appscr').classList.remove('hide');
+  $('#who').textContent=`${f.user}@${f.host}`;
+  await refreshPick();
+}
+async function refreshPick(sel){
+  const pick=$('#app-pick');pick.replaceChildren(el('option',{value:'@example'},'Пример'));
+  Object.keys(apps).forEach(n=>pick.append(el('option',{value:n},n)));
+  if(sel)pick.value=sel;
+  await openApp(pick.value);
+}
+async function openApp(name){
+  let text;
+  if(name==='@example')text=await (await fetch('example.yaml')).text();else text=apps[name];
+  try{doc=await invoke('parse_yaml',{text});curPage=0;renderTabs();renderPage()}
+  catch(e){$('#page').replaceChildren(el('div',{class:'err'},'Ошибка в файле описания: '+e))}
+}
+$('#app-pick').onchange=e=>openApp(e.target.value);
+$('#b-file').onclick=()=>$('#file-in').click();
+$('#file-in').onchange=async e=>{const f=e.target.files[0];if(!f)return;apps[f.name]=await f.text();save('apps',apps);e.target.value='';refreshPick(f.name)};
+$('#b-out').onclick=async()=>{await invoke('disconnect');$('#appscr').classList.add('hide');$('#login').classList.remove('hide')};
+
+function renderTabs(){
+  const t=$('#tabs');t.replaceChildren();
+  (doc.pages||[]).forEach((p,i)=>t.append(el('button',{class:i===curPage?'on':'',onclick:()=>{curPage=i;renderTabs();renderPage()}},p.title||('Страница '+(i+1)))));
+}
+
+/* ---------- подстановка значений в команды ---------- */
+const q=s=>"'"+String(s).replace(/'/g,"'\\''")+"'";
+function build(cmd,fields){
+  return cmd.replace(/\{(\w+)\}/g,(_,n)=>{
+    const f=fields[n];if(!f)throw new Error(`В команде есть {${n}}, но такого поля нет`);
+    const v=f.el.value;
+    switch(f.def.type){
+      case'host':if(!/^[A-Za-z0-9._:-]+$/.test(v))throw new Error(`Поле «${f.def.label||n}»: недопустимый адрес`);return v;
+      case'number':if(!/^-?\d+$/.test(v))throw new Error(`Поле «${f.def.label||n}»: нужно число`);return v;
+      case'choice':return v; // значения берутся из файла описания, а не вводятся вручную
+      default:return q(v);
+    }
+  });
+}
+
+async function exec(cmd){const r=await invoke('run',{command:cmd});return r}
+
+const SOURCES={
+  memory:"free -b | awk '/^Mem:/{print $2, $3}'",
+  disk:"df -B1 / | awk 'NR==2{print $2, $3}'"
+};
+
+function renderPage(){
+  const page=(doc.pages||[])[curPage];const box=$('#page');box.replaceChildren();if(!page)return;
+  const fields={};
+  (page.items||[]).forEach(it=>{
+    const card=el('div',{class:'card'});box.append(card);
+    if(it.field){
+      const type=it.type||'text';let input;
+      if(type==='choice'){input=el('select');Object.entries(it.options||{}).forEach(([k,v])=>input.append(el('option',{value:v},k)))}
+      else{input=el('input',{type:type==='number'?'number':'text',autocapitalize:'off'});if(it.default!=null)input.value=it.default}
+      fields[it.field]={def:{...it,type},el:input};
+      card.append(el('label',{},it.label||it.field),input);
+    }else if(it.button){
+      const out=el('pre',{class:'hide'});
+      card.append(el('button',{onclick:async()=>{
+        out.classList.remove('hide');out.textContent='Выполняется…';
+        try{const r=await exec(build(it.run,fields));out.textContent=(r.output||'(пусто)')+(r.code?`\n[код выхода ${r.code}]`:'')}
+        catch(e){out.textContent=String(e)}
+      }},it.button),out);
+    }else if(it.progress){
+      const bar=el('progress',{max:100,value:0}),txt=el('div',{},'…');
+      const upd=async()=>{
+        try{
+          const cmd=it.run||SOURCES[it.source];if(!cmd)throw new Error('Неизвестный source: '+it.source);
+          const r=await exec(cmd);const [total,used]=r.output.trim().split(/\s+/).map(Number);
+          if(!total||isNaN(used))throw new Error('Не удалось разобрать ответ: '+r.output);
+          const u=it.unit||'MB',k=UNITS[u]||1;
+          bar.value=used/total*100;txt.textContent=`${(used/k).toFixed(0)} из ${(total/k).toFixed(0)} ${u} (${(used/total*100).toFixed(0)}%)`;
+        }catch(e){txt.textContent=String(e);txt.className='err'}
+      };
+      card.append(el('b',{},it.progress),bar,txt,el('button',{class:'sec',onclick:upd},'Обновить'));upd();
+    }
+  });
+}
+renderFavs();
+</script>
+</body>
+</html>

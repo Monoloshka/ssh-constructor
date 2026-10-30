@@ -21,12 +21,16 @@ jobs:
       - run: npm install
       - run: npx tauri icon app-icon.svg
       - run: npx tauri build --bundles deb,appimage
+      - name: rpm (Fedora, openSUSE), не критично
+        continue-on-error: true
+        run: npx tauri build --bundles rpm
       - uses: actions/upload-artifact@v4
         with:
           name: linux-deb-appimage
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/rpm/*.rpm
 
   flatpak:
     needs: linux

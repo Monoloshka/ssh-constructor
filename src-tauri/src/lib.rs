@@ -105,7 +105,7 @@ async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn run(state: State<'_, AppState>, command: String) -> Result<RunOut, String> {
+async fn run_command(state: State<'_, AppState>, command: String) -> Result<RunOut, String> {
     let mut guard = state.session.lock().await;
     let handle = guard.as_mut().ok_or("Нет подключения")?;
 
@@ -142,7 +142,7 @@ fn parse_yaml(text: String) -> Result<serde_json::Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![connect, disconnect, run, parse_yaml])
+        .invoke_handler(tauri::generate_handler![connect, disconnect, run_command, parse_yaml])
         .run(tauri::generate_context!())
         .expect("ошибка запуска приложения");
 }

@@ -162,7 +162,7 @@ function build(cmd,fields){
   });
 }
 
-async function exec(cmd){const r=await invoke('run',{command:cmd});return r}
+async function exec(cmd){const r=await invoke('run_command',{command:cmd});return r}
 
 const SOURCES={
   memory:"free -b | awk '/^Mem:/{print $2, $3}'",

@@ -24,7 +24,8 @@ button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
 .tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 pre{background:#000;color:#cfe;padding:10px;border-radius:8px;overflow:auto;white-space:pre-wrap;max-height:50vh;margin:8px 0 0}
 progress{width:100%;height:20px}
-.err{color:var(--err)}.ok{color:#16a34a}.hint{font-size:.85em;opacity:.75;margin:4px 0}.hide{display:none}
+.err{color:var(--err)}.ok{color:#16a34a}table{border-collapse:collapse;width:100%;font-size:.88em}th,td{padding:5px 7px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}td.n{text-align:right}tr.off td{opacity:.6}
+button.sm{padding:3px 8px;margin:1px;font-size:.85em}.hint{font-size:.85em;opacity:.75;margin:4px 0}.hide{display:none}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--fg);max-width:90vw}
 </style>
 </head>
@@ -49,7 +50,6 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--bg);colo
       <details><summary>SSH-ключ (необязательно)</summary>
         <label>Путь к файлу ключа</label><input id="f-key" placeholder="/home/user/.ssh/id_ed25519"></details>
       <button id="b-connect">Подключиться</button>
-      <button id="b-test" class="sec">Проверить подключение</button>
       <button id="b-save" class="sec">Добавить в избранное</button>
       <div id="login-err" class="err"></div>
     </div>
@@ -130,8 +130,6 @@ async function tryConnect(f,pw,key,err){
   return false;
 }
 $('#b-connect').onclick=async()=>{const f=formData();if(await tryConnect(f,$('#f-pass').value,$('#f-key').value.trim(),$('#login-err'))){$('#f-pass').value='';enterApp(f)}};
-$('#b-test').onclick=async()=>{const err=$('#login-err');
-  if(await tryConnect(formData(),$('#f-pass').value,$('#f-key').value.trim(),err)){await invoke('disconnect');err.className='ok';err.textContent='✓ Подключение успешно: сервер отвечает, логин и пароль верные'}};
 $('#f-show').onchange=e=>{$('#f-pass').type=e.target.checked?'text':'password'};
 
 /* ---------- экран приложения ---------- */
@@ -192,15 +190,92 @@ async function exec(cmd){const r=await invoke('run_command',{command:cmd});retur
 
 const SOURCES={ // команды выводят "всего занято" в килобайтах; работают и на BusyBox (OpenWrt)
   memory:{mul:1024,cmd:"awk '/^MemTotal/{t=$2}/^MemAvailable/{a=$2}/^MemFree/{f=$2}END{if(!a)a=f;print t,t-a}' /proc/meminfo"},
-  disk:{mul:1024,cmd:"df -kP / | awk 'NR==2{print $2,$3}'"}
+  disk:{mul:1024,cmd:"df -kP $([ -d /overlay ] && echo /overlay || echo /) | awk 'NR==2{print $2,$3}'"}
 };
+
+
+/* ---------- список служб OpenWrt (/etc/init.d) ---------- */
+const SVC_LIST=['for i in /etc/init.d/*; do n=${i##*/}; e=0; $i enabled >/dev/null 2>&1 && e=1; r=0; $i running >/dev/null 2>&1 && r=1; echo "S $n $e $r"; done','echo U','ubus call service list 2>/dev/null'].join('\n');
+const SVC_SAMPLE=['snap(){ for p in $P; do [ -r /proc/$p/stat ] && echo "$p $(sed \'s/.*) //\' /proc/$p/stat | awk \'{print $12+$13}\') $(awk \'/VmRSS/{print $2}\' /proc/$p/status)"; done; }',
+ 'ct(){ awk \'/^cpu /{s=0;for(i=2;i<=NF;i++)s+=$i;print s}\' /proc/stat; }',
+ 'mt=$(awk \'/^MemTotal/{print $2}\' /proc/meminfo)',
+ 'a=$(snap); c1=$(ct); sleep 1; b=$(snap); c2=$(ct)',
+ 'echo "T $mt $((c2-c1))"; echo "$a" | sed \'s/^/A /\'; echo "$b" | sed \'s/^/B /\''].join('\n');
+const RISKY=['dropbear','network'];
+
+function renderServices(card){
+  const filter=el('input',{placeholder:'Поиск по названию…'});
+  const only=el('input',{type:'checkbox',style:'width:auto'});
+  const info=el('div',{class:'hint',style:'white-space:pre-wrap'});
+  const box=el('div',{style:'overflow-x:auto;margin-top:8px'});
+  let rows=[];
+  card.append(el('b',{},'Службы (из /etc/init.d)'),filter,
+    el('label',{style:'display:flex;gap:6px;align-items:center'},only,'Только запущенные'),
+    el('button',{class:'sec',onclick:refresh},'Обновить'),info,box,
+    el('div',{class:'hint'},'CPU и RAM показаны для служб, которыми управляет procd (в процентах от всей системы). У остановленных служб эти поля пустые. «Перезагрузка» заставляет службу перечитать настройки, не останавливая её.'));
+  filter.oninput=draw;only.onchange=draw;
+
+  async function refresh(){
+    info.textContent='Обновление…';
+    try{
+      const r=await exec(SVC_LIST);const [head,ub='']=r.output.split(/\nU\n/);
+      const pids={};
+      try{const j=JSON.parse(ub);for(const [n,v] of Object.entries(j))for(const ins of Object.values(v.instances||{}))if(ins.pid)(pids[n]=pids[n]||[]).push(+ins.pid)}catch{}
+      rows=head.split('\n').filter(l=>l.startsWith('S ')).map(l=>{const [,n,e,r]=l.split(' ');return{n,en:e==='1',run:r==='1',pids:pids[n]||[],cpu:null,mem:null}})
+        .filter(x=>/^[A-Za-z0-9._@-]+$/.test(x.n)).sort((a,b)=>a.n.localeCompare(b.n));
+      const all=[...new Set(rows.flatMap(x=>x.pids))].filter(Number.isInteger);
+      if(all.length){
+        const s=await exec(`P="${all.join(' ')}"\n`+SVC_SAMPLE);
+        const A={},B={};let mt=0,dt=0;
+        for(const l of s.output.split('\n')){const f=l.trim().split(/\s+/);
+          if(f[0]==='T'){mt=+f[1];dt=+f[2]}else if(f[0]==='A')A[f[1]]=[+f[2],+f[3]];else if(f[0]==='B')B[f[1]]=[+f[2],+f[3]]}
+        for(const x of rows){let c=0,m=0,ok=false;
+          for(const p of x.pids)if(A[p]&&B[p]){ok=true;c+=B[p][0]-A[p][0];m+=B[p][1]||0}
+          if(ok&&dt>0&&mt>0){x.cpu=c/dt*100;x.mem=m/mt*100}}
+      }
+      info.textContent=`Служб: ${rows.length}, запущено: ${rows.filter(x=>x.run).length}`;draw();
+    }catch(e){info.textContent='Ошибка: '+e}
+  }
+
+  async function act(x,verb){
+    if((verb==='stop'||verb==='kill'||verb==='disable')&&RISKY.includes(x.n)&&!(await ask(`«${x.n}» нужна для связи с роутером. Если её остановить или отключить, вы можете потерять доступ по SSH. Продолжить?`)))return;
+    if(verb==='kill'&&!(await ask(`Принудительно завершить «${x.n}» (kill -9, PID ${x.pids.join(', ')})?`)))return;
+    info.textContent=`${x.n}: ${verb}…`;
+    try{
+      const r=await exec(verb==='kill'?'kill -9 '+x.pids.join(' '):`/etc/init.d/${x.n} ${verb}`);
+      const out=r.output.trim();
+      info.textContent=`${x.n}: ${verb} — ${r.code===0||r.code===null?'готово':'ошибка, код '+r.code}`+(out?'\n'+out:'');
+    }catch(e){info.textContent=`${x.n}: ${e}`}
+    setTimeout(refresh,600);
+  }
+
+  function draw(){
+    const q=filter.value.trim().toLowerCase();
+    const t=el('table'),hd=el('tr');
+    ['Служба','Автозапуск','Состояние','CPU %','RAM %','PID','Действия'].forEach(h=>hd.append(el('th',{},h)));t.append(hd);
+    rows.filter(x=>(!q||x.n.toLowerCase().includes(q))&&(!only.checked||x.run)).forEach(x=>{
+      const btn=(t,v,off)=>{const p={class:'sm'+(v==='stop'||v==='kill'?' sec':''),onclick:()=>act(x,v)};if(off)p.disabled='';return el('button',p,t)};
+      const tr=el('tr',{class:x.run?'':'off'});
+      tr.append(el('td',{},el('b',{},x.n)),
+        el('td',{},btn(x.en?'✓ вкл':'— выкл',x.en?'disable':'enable')),
+        el('td',{},x.run?'● работает':'○ остановлена'),
+        el('td',{class:'n'},x.cpu==null?'—':x.cpu.toFixed(1)),
+        el('td',{class:'n'},x.mem==null?'—':x.mem.toFixed(1)),
+        el('td',{},x.pids.length?x.pids.join(', '):'—'),
+        el('td',{},btn('Старт','start',x.run),btn('Перезапуск','restart'),btn('Перезагрузка','reload',!x.run),btn('Стоп','stop',!x.run),btn('Убить','kill',!x.pids.length)));
+      t.append(tr)});
+    box.replaceChildren(t);
+  }
+  refresh();
+}
 
 function renderPage(){
   const page=(doc.pages||[])[curPage];const box=$('#page');box.replaceChildren();if(!page)return;
   const fields={};
   (page.items||[]).forEach(it=>{
     const card=el('div',{class:'card'});box.append(card);
-    if(it.field){
+    if(it.services){renderServices(card)}
+    else if(it.field){
       const type=it.type||'text';let input;
       if(type==='choice'){input=el('select');Object.entries(it.options||{}).forEach(([k,v])=>input.append(el('option',{value:v},k)))}
       else{input=el('input',{type:type==='number'?'number':'text',autocapitalize:'off'});if(it.default!=null)input.value=it.default}
@@ -217,11 +292,11 @@ function renderPage(){
       const bar=el('progress',{max:100,value:0}),txt=el('div',{},'…');
       const upd=async()=>{
         try{
-          const src=it.run?{cmd:it.run,mul:1}:SOURCES[it.source];if(!src)throw new Error('Неизвестный source: '+it.source);
+          const src=it.run?{cmd:it.run,mul:1}:(it.source==='disk'&&it.path)?{mul:1024,cmd:`df -kP ${q(it.path)} | awk 'NR==2{print $2,$3}'`}:SOURCES[it.source];if(!src)throw new Error('Неизвестный source: '+it.source);
           const r=await exec(src.cmd);const [total,used]=r.output.trim().split(/\s+/).map(Number);
           if(!total||isNaN(used))throw new Error('Не удалось разобрать ответ: '+r.output);
-          const u=it.unit||'MB',k=(UNITS[u]||1)/src.mul;
-          bar.value=used/total*100;txt.textContent=`${(used/k).toFixed(0)} из ${(total/k).toFixed(0)} ${u} (${(used/total*100).toFixed(0)}%)`;
+          const bytes=total*src.mul;let u=it.unit;if(!u||u==='auto')u=bytes>=1073741824?'GB':bytes>=1048576?'MB':'KB';const k=(UNITS[u]||1)/src.mul,dec=u==='GB'?2:u==='MB'?1:0;
+          bar.value=used/total*100;txt.textContent=`${(used/k).toFixed(dec)} из ${(total/k).toFixed(dec)} ${u} (${(used/total*100).toFixed(0)}%)`;
         }catch(e){txt.textContent=String(e);txt.className='err'}
       };
       card.append(el('b',{},it.progress),bar,txt,el('button',{class:'sec',onclick:upd},'Обновить'));upd();

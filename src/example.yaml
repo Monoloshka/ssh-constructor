@@ -1,11 +1,11 @@
 app:
-  name: Мой сервер
+  name: Роутер OpenWrt
 
 pages:
+  # Список служб строится сам из /etc/init.d: добавлять вручную ничего не нужно
   - title: Службы
     items:
-      - button: Запустить SFTP
-        run: systemctl start openssh-sftp-server
+      - services: openwrt
 
   - title: Пинг
     items:
@@ -29,7 +29,7 @@ pages:
     items:
       - progress: Оперативная память
         source: memory
-        unit: MB
-      - progress: Диск
-        source: disk
-        unit: GB
+      - progress: Хранилище (как в LuCI)
+        source: disk          # на OpenWrt берётся /overlay; другой путь: path: /tmp
+      - button: Аптайм и нагрузка
+        run: uptime
